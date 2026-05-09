@@ -37,7 +37,7 @@ export interface SpanNode {
 export interface CodebaseConfig {
     name: string;
     path: string;
-    type: "springboot" | "ejb" | "generic";
+    type: "springboot" | "springmvc" | "ejb" | "generic";
     sourceRoots: string[];
 }
 export interface SwConfig {
@@ -52,6 +52,7 @@ export interface SwConfig {
         directory: string;
     };
     promptOverride?: string;
+    repo?: string;
 }
 export interface CodeLocation {
     codebase: string;
@@ -100,5 +101,7 @@ export interface TraceMeta {
     oapUrl: string;
     fetchedAt: string;
     codebases: string[];
+    mode?: "analyze" | "design";
+    repo?: string;
 }
 export declare const DEFAULT_CONFIG: SwConfig;

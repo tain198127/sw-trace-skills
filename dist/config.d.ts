@@ -1,6 +1,13 @@
 import type { SwConfig } from "./types.js";
-export declare function configPath(cwd: string): string;
-export declare function loadConfig(cwd: string): Promise<SwConfig>;
-export declare function saveConfig(cwd: string, config: SwConfig): Promise<string>;
+export declare function listRepos(): string[];
+export declare function getCurrentRepo(): string | null;
+export declare function setCurrentRepo(name: string): void;
+export declare function repoConfigPath(repoName: string): string;
+export declare function repoExists(repoName: string): boolean;
+export declare function initRepo(repoName: string, config?: Partial<SwConfig>): string;
+export declare function deleteRepo(repoName: string): void;
+export declare function resetAll(): void;
+export declare function loadConfig(repoName: string): SwConfig;
+export declare function saveConfig(repoName: string, config: SwConfig): string;
 export declare function oapUrl(config: SwConfig): string;
-export declare function resolvePromptOverride(config: SwConfig): Promise<string | null>;
+export declare function resolvePromptOverride(config: SwConfig): string | null;

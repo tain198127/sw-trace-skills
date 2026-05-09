@@ -17,6 +17,15 @@ npm run build
 
 安装后 `/sw-trace` 命令自动在 Claude Code 中可用。
 
+## Repo 概念
+
+所有配置按 repo（工程）隔离。每个 repo 独立保存 SkyWalking 地址、代码仓库路径等。
+
+- 配置存储位置：`~/.claude/sw-trace/repos/<repo名>/config.yaml`
+- 自动记住上次使用的 repo，下次默认使用
+- 可通过 `--repo` 指定使用其他 repo
+- `/sw-trace reset` 清空所有 repo
+
 ## 使用方法
 
 ### 1. 配置（首次使用必须）
@@ -27,14 +36,13 @@ npm run build
 /sw-trace config
 ```
 
-Claude Code 会交互式引导你配置：
-- SkyWalking OAP 地址（host、port、protocol）
-- 代码仓库路径（支持多个工程，每个指定类型 springboot/ejb/generic）
-- 输出目录（默认 `.trace`）
+Claude Code 会交互式引导你：
+1. 选择已有 repo 或创建新 repo
+2. 配置 SkyWalking OAP 地址（host、port、protocol）
+3. 配置代码仓库路径（支持多个工程，每个指定类型 springboot/springmvc/ejb/generic）
+4. 输出目录（默认 `.trace`）
 
-配置保存到项目根目录的 `.claude/sw-trace.yaml`。
-
-也可以手动创建 `.claude/sw-trace.yaml`：
+也可以手动创建配置文件到 `~/.claude/sw-trace/repos/<repo名>/config.yaml`：
 
 ```yaml
 skywalking:
@@ -46,21 +54,40 @@ skywalking:
 codebases:
   - name: "my-service"
     path: "/path/to/project"
-    type: "springboot"
+    type: "springboot"        # springboot | springmvc | ejb | generic
     source_roots:
       - "src/main/java"
 
 output:
-  directory: ".trace"
+  directory: ".trace"         # 支持相对路径或绝对路径（如 /Users/xxx/output）
 
 # 可选：外部提示词覆盖
 # prompt_override: "/path/to/custom-prompt.md"
 ```
 
-### 2. 抓取 trace
+### 2. 查看/切换 repo
 
 ```
-/sw-trace <trace_ids> [--name <name>] [--no-analyze] [--no-locate] [--no-csv]
+/sw-trace repo              # 列出所有 repo，标记当前使用的
+/sw-trace repo <name>       # 切换到指定 repo
+```
+
+**示例：**
+
+```
+/sw-trace repo
+# Available repos:
+#   bjs_newb * (current)
+#   payment-system
+
+/sw-trace repo payment-system
+# Switched to repo: payment-system
+```
+
+### 3. 抓取并分析 trace
+
+```
+/sw-trace <trace_ids> [--name <name>] [--repo <repo>]
 ```
 
 **参数：**
@@ -69,6 +96,7 @@ output:
 |------|------|
 | `trace_ids` | 一个或多个 SkyWalking trace ID（空格或逗号分隔） |
 | `--name, -n` | 输出文件夹名称（默认 `trace-<时间戳>`） |
+| `--repo, -r` | 指定 repo（默认使用上次，也可用 `/sw-trace repo <name>` 切换） |
 | `--no-analyze` | 跳过自动分析 |
 | `--no-locate` | 跳过代码定位 |
 | `--no-csv` | 跳过 CSV 导出 |
@@ -76,14 +104,39 @@ output:
 **示例：**
 
 ```
-/sw-trace 52b3b78f4c724dca916460244100cf07.83.17782147329040001 --name login-bug
+/sw-trace abc123.1.123 --name login-bug
+/sw-trace id1 id2 id3 --name order-flow --repo bjs_newb
 ```
 
+### 4. 全链路详细设计文档
+
 ```
-/sw-trace id1 id2 id3 --name order-flow
+/sw-trace <trace_ids> --name <name> --design
 ```
 
-### 3. 查看帮助
+使用 `--design` 选项时，Claude Code 会阅读源代码并生成符合标准详细设计文档规范的 `design.md`，包含：
+
+| 章节 | 内容 |
+|------|------|
+| 概述 | 涉及的服务、完整链路概述 |
+| 全链路流程图 | Mermaid flowchart，标注错误和慢调用 |
+| 时序图 | Mermaid sequence diagram，按时间展示服务交互 |
+| 状态图 | Mermaid state diagram，关键业务对象状态流转 |
+| 接口设计 | 接口列表 + 每个接口的入参/出参定义（从源码提取） |
+| 数据库设计 | 涉及的表、SQL 语句、调用位置 |
+| 服务间调用关系 | 服务依赖关系图 |
+| 性能分析 | 调用耗时分布、瓶颈分析 |
+| 异常分析 | 错误详情、传播链路、根因分析 |
+
+### 5. 重置配置
+
+```
+/sw-trace reset
+```
+
+清空所有 repo 和配置，重新开始。
+
+### 6. 查看帮助
 
 ```
 /sw-trace help
@@ -91,28 +144,53 @@ output:
 
 ## 输出结构
 
-抓取后在项目根目录下生成：
+所有输出文件在当前项目目录的 `.trace/<name>/` 下。
+
+### 标准模式
 
 ```
 .trace/<name>/
-├── meta.json              # 抓取元信息（trace ID 列表、时间、OAP 地址）
+├── meta.json              # 抓取元信息（含 repo 名称）
 ├── raw/
-│   ├── <trace_id>.json    # 原始 span 数据
-│   └── ...
-├── <trace_id>.csv         # 层级 CSV（每个 trace 一个文件）
+│   └── <trace_id>.json    # 原始 span 数据
+├── <trace_id>.csv         # 层级 CSV
 ├── locations.json         # 代码定位结果
 └── analysis.md            # 分析报告
 ```
 
-## 分析报告内容
+### 设计文档模式 (--design)
 
-`analysis.md` 包含：
+```
+.trace/<name>/
+├── meta.json
+├── raw/
+│   └── <trace_id>.json
+├── <trace_id>.csv
+├── locations.json
+├── analysis.md
+└── design.md              # 详细设计文档
+```
 
-- **概览** — 总 span 数、总耗时、错误数、慢调用数
-- **错误列表** — 出错的 span 及其代码定位
-- **慢调用排行** — 超过 1000ms 的调用按耗时排序
-- **数据库调用** — SQL 语句、耗时、数据库实例
-- **跨 trace 对比** — 多个 trace 共同命中的慢代码位置
+## 配置存储位置
+
+```
+~/.claude/sw-trace/
+└── repos/
+    ├── .current                  # 记录上次使用的 repo 名称
+    ├── bjs_newb/
+    │   └── config.yaml           # 北金所官网的配置
+    └── payment-system/
+        └── config.yaml           # 支付系统的配置
+```
+
+## 支持的工程类型
+
+| 类型 | 说明 |
+|------|------|
+| `springboot` | Spring Boot 项目，支持 `@RestController` / `@GetMapping` 等注解 |
+| `springmvc` | Spring MVC 项目（非 Boot），注解匹配逻辑与 springboot 一致 |
+| `ejb` | EJB 项目，支持 `@Path` / `@GET` 等 JAX-RS 注解 |
+| `generic` | 通用项目，仅通过 service_code 全文搜索 |
 
 ## 代码定位原理
 
@@ -125,23 +203,13 @@ output:
 
 ## 提示词外部挂载
 
-在 `.claude/sw-trace.yaml` 中配置：
+在 repo 的 config.yaml 中配置：
 
 ```yaml
 prompt_override: "/path/to/custom-prompt.md"
 ```
 
-配置后，Claude Code 执行 `/sw-trace` 时会优先使用该文件中的指令，未覆盖的部分回退到 SKILL.md 默认指令。
-
-## 独立 CLI 使用
-
-也可以在终端直接调用编译后的 CLI：
-
-```bash
-node ~/.claude/skills/sw-trace/dist/index.js <trace_ids> --name <name>
-```
-
-注意：`config` 子命令建议通过 Claude Code 执行，CLI 模式下仅支持 fetch 操作。
+配置后，Claude Code 执行 `/sw-trace` 时会优先使用该文件中的指令。
 
 ## 项目结构
 
@@ -153,7 +221,7 @@ sw-trace/
 ├── tsconfig.json
 ├── src/
 │   ├── index.ts            # CLI 入口
-│   ├── config.ts           # 配置管理
+│   ├── config.ts           # 配置管理（repo 隔离）
 │   ├── client.ts           # GraphQL 客户端
 │   ├── tree.ts             # 调用链树构建
 │   ├── csv-writer.ts       # CSV 导出
