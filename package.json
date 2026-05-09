@@ -1,0 +1,19 @@
+{
+  "name": "sw-trace",
+  "version": "1.0.0",
+  "description": "SkyWalking trace fetcher, code locator and analyzer for Claude Code",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "yaml": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  }
+}
