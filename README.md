@@ -65,7 +65,26 @@ output:
 # prompt_override: "/path/to/custom-prompt.md"
 ```
 
-### 2. 查看/切换 repo
+### 2. 交互式选择 trace（无需 trace_id）
+
+直接输入 `/sw-trace`，Claude Code 会引导你完成三步选择：
+
+```
+/sw-trace
+```
+
+1. **选择 trace** — 自动查询 SkyWalking 最近 30 条 trace，多选你要分析的 trace
+2. **选择名称** — 预设选项：时间戳 / 端点名 / 自定义输入
+3. **选择模式** — analysis（分析报告）或 design（详细设计文档）
+
+可指定高级参数：
+
+```
+/sw-trace --limit 50 --minutes 60   # 查询最近 60 分钟内的 50 条 trace
+/sw-trace --repo bjs_newb           # 指定 repo
+```
+
+### 3. 查看/切换 repo
 
 ```
 /sw-trace repo              # 列出所有 repo，标记当前使用的
@@ -84,10 +103,10 @@ output:
 # Switched to repo: payment-system
 ```
 
-### 3. 抓取并分析 trace
+### 4. 抓取并分析 trace（直接传 trace_id）
 
 ```
-/sw-trace <trace_ids> [--name <name>] [--repo <repo>]
+/sw-trace <trace_ids> [--name <name>] [--repo <repo>] [--design]
 ```
 
 **参数：**
@@ -97,6 +116,7 @@ output:
 | `trace_ids` | 一个或多个 SkyWalking trace ID（空格或逗号分隔） |
 | `--name, -n` | 输出文件夹名称（默认 `trace-<时间戳>`） |
 | `--repo, -r` | 指定 repo（默认使用上次，也可用 `/sw-trace repo <name>` 切换） |
+| `--design` | 生成全链路详细设计文档 |
 | `--no-analyze` | 跳过自动分析 |
 | `--no-locate` | 跳过代码定位 |
 | `--no-csv` | 跳过 CSV 导出 |
@@ -106,9 +126,10 @@ output:
 ```
 /sw-trace abc123.1.123 --name login-bug
 /sw-trace id1 id2 id3 --name order-flow --repo bjs_newb
+/sw-trace id1 --name payment --design
 ```
 
-### 4. 全链路详细设计文档
+### 5. 全链路详细设计文档
 
 ```
 /sw-trace <trace_ids> --name <name> --design
@@ -128,7 +149,7 @@ output:
 | 性能分析 | 调用耗时分布、瓶颈分析 |
 | 异常分析 | 错误详情、传播链路、根因分析 |
 
-### 5. 重置配置
+### 6. 重置配置
 
 ```
 /sw-trace reset
@@ -136,7 +157,7 @@ output:
 
 清空所有 repo 和配置，重新开始。
 
-### 6. 查看帮助
+### 7. 查看帮助
 
 ```
 /sw-trace help

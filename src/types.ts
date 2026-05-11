@@ -104,6 +104,15 @@ export interface DbCallInfo {
   location?: CodeLocation;
 }
 
+export interface TraceSummary {
+  traceId: string;
+  startTime: string;
+  duration: number;
+  endpointName: string;
+  isError: boolean;
+  serviceCode: string;
+}
+
 export interface TraceMeta {
   name: string;
   traceIds: string[];

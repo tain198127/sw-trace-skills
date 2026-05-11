@@ -118,3 +118,78 @@ export async function fetchTrace(oapUrl, traceId, timeout = 30) {
     }
     return spans.map((s) => parseSpan(s));
 }
+const LIST_TRACES_QUERY = `
+query queryTraces($condition: TraceQueryCondition) {
+  queryBasicTraces(condition: $condition) {
+    traces {
+      traceIds
+      endpointNames
+      duration
+      start
+      isError
+    }
+  }
+}
+`.trim();
+export class TraceListError extends TraceExporterError {
+}
+export async function queryRecentTraces(oapUrl, limit = 30, minutesBack = 60, timeout = 30) {
+    const url = `${oapUrl}/graphql`;
+    const now = new Date();
+    const from = new Date(now.getTime() - minutesBack * 60 * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+    const payload = {
+        query: LIST_TRACES_QUERY,
+        variables: {
+            condition: {
+                queryDuration: {
+                    start: fmt(from),
+                    end: fmt(now),
+                    step: "MINUTE",
+                },
+                queryOrder: "BY_START_TIME",
+                paging: { pageNum: 1, pageSize: limit },
+                traceState: "ALL",
+            },
+        },
+    };
+    let resp;
+    try {
+        resp = await axios.post(url, payload, {
+            timeout: timeout * 1000,
+            headers: { "Content-Type": "application/json" },
+        });
+    }
+    catch (err) {
+        if (axios.isAxiosError(err) && !err.response) {
+            throw new TraceListError(`Cannot connect to OAP at ${url}: ${err.message}`);
+        }
+        throw new TraceListError(`Request to OAP failed: ${err}`);
+    }
+    if (resp.status !== 200) {
+        throw new TraceListError(`OAP returned HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`);
+    }
+    const data = resp.data;
+    if (!data) {
+        throw new TraceListError("OAP returned empty response");
+    }
+    const errors = data.errors;
+    if (errors) {
+        throw new TraceListError(`GraphQL errors: ${JSON.stringify(errors)}`);
+    }
+    const traces = data?.data?.queryBasicTraces?.traces;
+    if (!traces || traces.length === 0) {
+        return [];
+    }
+    return traces.map((t) => ({
+        traceId: Array.isArray(t.traceIds) ? String(t.traceIds[0]) : "",
+        startTime: t.start || "",
+        duration: t.duration || 0,
+        endpointName: Array.isArray(t.endpointNames)
+            ? String(t.endpointNames[0] || "")
+            : "",
+        isError: t.isError || false,
+        serviceCode: "",
+    }));
+}

@@ -4,7 +4,7 @@ import {
   loadConfig, saveConfig, oapUrl, getCurrentRepo, listRepos,
   initRepo, setCurrentRepo, repoExists, resetAll,
 } from "./config.js";
-import { fetchTrace, TraceNotFoundError, TraceFetchError, TraceResponseError } from "./client.js";
+import { fetchTrace, queryRecentTraces, TraceNotFoundError, TraceFetchError, TraceResponseError, TraceListError } from "./client.js";
 import { buildCallTree } from "./tree.js";
 import { writeTraceCsv } from "./csv-writer.js";
 import { locateAllSpans } from "./code-locator.js";
@@ -14,7 +14,7 @@ import type { TraceMeta } from "./types.js";
 // --- CLI argument parsing ---
 
 interface CliArgs {
-  command: "fetch" | "config" | "reset" | "repo" | "help";
+  command: "fetch" | "config" | "reset" | "repo" | "help" | "list";
   traceIds: string[];
   name: string;
   repo: string | null;
@@ -23,30 +23,50 @@ interface CliArgs {
   noLocate: boolean;
   noCsv: boolean;
   design: boolean;
+  limit: number;
+  minutes: number;
 }
 
 function parseArgs(rawArgs: string[]): CliArgs {
   const args = rawArgs.slice(2);
-  const defaults = { noAnalyze: false, noLocate: false, noCsv: false, design: false };
+  const cmdDefaults = { noAnalyze: false, noLocate: false, noCsv: false, design: false, limit: 30, minutes: 60 };
 
   if (args.length === 0 || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
-    return { command: "help", traceIds: [], name: "", repo: null, cwd: null, ...defaults };
+    return { command: "help", traceIds: [], name: "", repo: null, cwd: null, ...cmdDefaults };
   }
   if (args[0] === "config") {
     const repo = extractOpt(args, "--repo") || extractOpt(args, "-r") || null;
-    return { command: "config", traceIds: [], name: "", repo, cwd: null, ...defaults };
+    return { command: "config", traceIds: [], name: "", repo, cwd: null, ...cmdDefaults };
   }
   if (args[0] === "reset") {
-    return { command: "reset", traceIds: [], name: "", repo: null, cwd: null, ...defaults };
+    return { command: "reset", traceIds: [], name: "", repo: null, cwd: null, ...cmdDefaults };
   }
   if (args[0] === "repo") {
     const targetRepo = args[1] || null;
-    return { command: "repo", traceIds: [], name: "", repo: targetRepo, cwd: null, ...defaults };
+    return { command: "repo", traceIds: [], name: "", repo: targetRepo, cwd: null, ...cmdDefaults };
+  }
+  if (args[0] === "list") {
+    let repo: string | null = null;
+    let cwd: string | null = null;
+    let limit = 30;
+    let minutes = 60;
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === "--repo" || args[i] === "-r") {
+        repo = args[++i] || null;
+      } else if (args[i] === "--cwd") {
+        cwd = args[++i] || null;
+      } else if (args[i] === "--limit" || args[i] === "-l") {
+        limit = parseInt(args[++i]) || 30;
+      } else if (args[i] === "--minutes" || args[i] === "-m") {
+        minutes = parseInt(args[++i]) || 15;
+      }
+    }
+    return { command: "list", traceIds: [], name: "", repo, cwd, noAnalyze: false, noLocate: false, noCsv: false, design: false, limit, minutes };
   }
 
   const traceIds: string[] = [];
   let name = "";
-  const opts = { ...defaults };
+  const opts = { ...cmdDefaults };
   let repo: string | null = null;
   let cwd: string | null = null;
 
@@ -65,6 +85,10 @@ function parseArgs(rawArgs: string[]): CliArgs {
       opts.noCsv = true;
     } else if (args[i] === "--design") {
       opts.design = true;
+    } else if (args[i] === "--limit" || args[i] === "-l") {
+      opts.limit = parseInt(args[++i]) || 30;
+    } else if (args[i] === "--minutes" || args[i] === "-m") {
+      opts.minutes = parseInt(args[++i]) || 15;
     } else {
       const parts = args[i].split(",");
       for (const part of parts) {
@@ -75,7 +99,7 @@ function parseArgs(rawArgs: string[]): CliArgs {
   }
 
   if (traceIds.length === 0) {
-    return { command: "help", traceIds: [], name: "", repo, cwd, ...defaults };
+    return { command: "list", traceIds: [], name: "", repo, cwd, ...opts };
   }
 
   if (!name) {
@@ -100,6 +124,7 @@ sw-trace — SkyWalking trace fetcher, code locator and analyzer
 
 Usage:
   sw-trace <trace_ids> [--name <name>] [--repo <repo>] [--cwd <dir>] [--no-analyze] [--no-locate] [--no-csv] [--design]
+  sw-trace list [--limit <n>] [--minutes <n>] [--repo <repo>]
   sw-trace config [--repo <repo>]
   sw-trace reset
   sw-trace help
@@ -115,8 +140,11 @@ Options:
   --no-locate     Skip code location
   --no-csv        Skip CSV export
   --design        Generate detailed design document
+  --limit, -l     Max traces to list (default: 30)
+  --minutes, -m   Time range in minutes (default: 15)
 
 Commands:
+  list            List recent traces from SkyWalking (default when no trace_id)
   repo            List repos (default), or switch to a repo: repo <name>
   config          Configure a repo (SkyWalking address, codebases, etc.)
   reset           Clear all repos and reconfigure from scratch
@@ -126,6 +154,8 @@ Examples:
   sw-trace abc123.1.123 --name login-bug
   sw-trace id1 id2 id3 --name order-flow --repo bjs_newb
   sw-trace id1 --name payment --design --cwd /path/to/project
+  sw-trace list --limit 30
+  sw-trace list --minutes 60 --repo bjs_newb
   sw-trace config --repo my-project
   sw-trace repo
   sw-trace repo bjs_newb
@@ -169,6 +199,50 @@ function runReset(): void {
   resetAll();
   console.log("All repos and configurations have been cleared.");
   console.log("Run '/sw-trace config' to set up a new repo.");
+}
+
+// --- List command ---
+
+async function runList(args: CliArgs): Promise<void> {
+  let repoName = args.repo;
+  if (!repoName) {
+    repoName = getCurrentRepo();
+  }
+  if (!repoName) {
+    console.error("No repo specified and no previous repo found.");
+    console.error("Run '/sw-trace config' to create a repo first.");
+    process.exit(1);
+  }
+
+  if (!repoExists(repoName)) {
+    console.error(`Repo '${repoName}' not found.`);
+    console.error(`Available repos: ${listRepos().join(", ") || "(none)"}`);
+    process.exit(1);
+  }
+
+  const config = loadConfig(repoName);
+  const url = oapUrl(config);
+
+  console.error(`Repo: ${repoName}`);
+  console.error(`OAP: ${url}`);
+  console.error(`Fetching recent ${args.limit} traces (last ${args.minutes} min)...`);
+
+  try {
+    const traces = await queryRecentTraces(url, args.limit, args.minutes, config.skywalking.timeout);
+    if (traces.length === 0) {
+      console.error("No traces found in the specified time range.");
+    } else {
+      console.error(`Found ${traces.length} trace(s).`);
+    }
+    // Output JSON to stdout for the skill to parse
+    console.log(JSON.stringify(traces, null, 2));
+  } catch (err) {
+    if (err instanceof TraceListError) {
+      console.error(`FAIL: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
 }
 
 // --- Main fetch flow ---
@@ -343,6 +417,9 @@ async function main(): Promise<void> {
       break;
     case "repo":
       runRepo(args);
+      break;
+    case "list":
+      await runList(args);
       break;
     case "fetch":
       await runFetch(args);
