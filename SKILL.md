@@ -5,7 +5,7 @@ description: SkyWalking trace fetcher, code locator and analyzer — batch fetch
 
 # SkyWalking Trace Agent
 
-Fetch SkyWalking traces, locate related source code, and generate analysis reports or detailed design documents.
+Fetch SkyWalking traces, locate related source code, and generate analysis reports, detailed design documents, or requirement specification documents.
 
 ## Commands
 
@@ -21,6 +21,12 @@ Fetch SkyWalking traces, locate related source code, and generate analysis repor
 /sw-trace <trace_ids> --name <name> --design
 ```
 
+### Fetch and generate requirement specification document
+
+```
+/sw-trace <trace_ids> --name <name> --requirement
+```
+
 **Arguments:**
 - `trace_ids` — One or more SkyWalking trace IDs (space or comma separated)
 
@@ -31,12 +37,14 @@ Fetch SkyWalking traces, locate related source code, and generate analysis repor
 - `--no-locate` — Skip code location
 - `--no-csv` — Skip CSV export
 - `--design` — Generate detailed design document (全链路详细设计文档)
+- `--requirement` — Generate requirement specification document (需求规格说明书)
 
 **Examples:**
 ```
 /sw-trace abc123.1.123 --name login-bug
 /sw-trace id1 id2 id3 --name order-flow
 /sw-trace id1 --name payment --design
+/sw-trace id1 --name order --requirement
 ```
 
 ### Configure
@@ -101,10 +109,12 @@ When the user invokes `/sw-trace` WITHOUT providing any trace IDs:
 6. **Choose mode** — Use `AskUserQuestion` to let the user pick the analysis mode:
    - **analysis** — Standard analysis report (errors, slow calls, DB calls, CSV export)
    - **design** — Detailed design document (全链路详细设计文档)
+   - **requirement** — Requirement specification document (需求规格说明书)
 
 7. **Execute** — With the selected trace_ids, name, and mode, proceed to the corresponding workflow:
    - **analysis** → Standard Analysis Mode, start from step 5 (the full deep analysis flow, steps 5-13)
    - **design** → Design Document Mode, start from step 1
+   - **requirement** → Requirement Document Mode, start from step 1
 
 ## Workflow — Standard Analysis Mode
 
@@ -120,7 +130,7 @@ When the user invokes `/sw-trace <trace_ids>` (without `--design`):
 
 5. **Execute the sw-trace CLI tool:**
    ```bash
-   node ~/.claude/skills/sw-trace/dist/index.js <trace_ids> --name <name> --cwd <current_project_dir> [--repo <name>] [--no-analyze] [--no-locate] [--no-csv] [--design]
+   node ~/.claude/skills/sw-trace/dist/index.js <trace_ids> --name <name> --cwd <current_project_dir> [--repo <name>] [--no-analyze] [--no-locate] [--no-csv] [--design] [--requirement]
    ```
 
 6. **Read all generated data** — Load every output file into context:
@@ -409,6 +419,168 @@ graph LR
 
 6. **Print output paths** — After generating `design.md`, list all generated files.
 
+## Workflow — Requirement Document Mode (--requirement)
+
+When the user invokes `/sw-trace <trace_ids> --requirement --name <name>`:
+
+1. **Execute fetch-only** — Run the CLI tool with `--requirement` flag. This fetches traces and saves raw data to `raw/*.json`, but skips analysis, code location, and CSV export. Only `meta.json` and `raw/*.json` are generated.
+
+   ```bash
+   node ~/.claude/skills/sw-trace/dist/index.js <trace_ids> --name <name> --cwd <current_project_dir> [--repo <name>] --requirement
+   ```
+
+2. **Read trace data** — Read EVERY `raw/*.json` file. Extract:
+   - Entry endpoints and their service names
+   - All span endpoints and their ordering in the call chain
+   - Database operations: `db.statement`, `db.type`, `db.instance` from span tags
+   - HTTP/RPC calls: `http.method`, `http.params`, peer services
+   - Business-relevant tag values (e.g., status codes, business IDs, operation types)
+
+3. **Read source code for business understanding** — For each codebase configured in the repo config, read relevant source files to understand business logic:
+   - **Controller/Handler methods** — Understand what each endpoint does from a business perspective, extract parameter names and meanings
+   - **Service layer** — Read service implementations to infer business rules, validations, state transitions
+   - **DAO/Repository** — Read data access code to understand what data is persisted and queried, and what state fields exist
+   - **Entity/Model classes** — Read entity classes to identify business objects, their fields, and status enums
+   - **Configuration files** — Check for business constants, status enums, validation rules defined in config
+
+4. **Infer business state machine** — From traces and source code:
+   - Identify business entities from DB table names and entity classes
+   - Identify status fields from entity fields and SQL UPDATE statements
+   - Map each state transition to the endpoint/service that triggers it
+   - Build a state transition table
+
+5. **Generate requirement specification document** — Write `.trace/<name>/requirement.md` with the following structure:
+
+### requirement.md 文档结构
+
+```markdown
+# 需求规格说明书：[名称]
+
+## 1. 概述
+- 文档目的：基于 trace 数据和源码分析，反推业务需求规格
+- 涉及的业务模块/服务列表
+- 核心业务流程简述
+
+## 2. 业务状态流转表
+
+以表格形式列出业务数据的所有状态，以及在哪个环节（接口/服务）对状态进行操作：
+
+| 业务对象 | 当前状态 | 目标状态 | 触发环节/接口 | 所属服务 | 操作类型 | 说明 |
+|----------|---------|---------|--------------|---------|---------|------|
+| 订单 | (新建) | 待支付 | POST /api/orders | order-service | 创建 | 用户提交订单 |
+| 订单 | 待支付 | 已支付 | POST /api/payment | payment-service | 更新 | 支付成功后回调 |
+| 订单 | 已支付 | 处理中 | PUT /api/orders/{id} | order-service | 更新 | 系统确认收款 |
+
+列说明：
+- **业务对象** — 业务实体的中文名称（如：订单、用户、合同）
+- **当前状态** — 操作前的状态（括弧表示初始创建）
+- **目标状态** — 操作后的状态
+- **触发环节/接口** — 触发该状态变更的 API 接口
+- **所属服务** — 接口所属的微服务名称
+- **操作类型** — 创建 / 更新 / 删除
+- **说明** — 业务场景描述
+
+## 3. 业务流程图
+
+使用 Mermaid flowchart 从业务视角描述流程（非技术调用链）：
+
+```mermaid
+flowchart TD
+    A[用户提交订单] --> B{系统校验订单信息}
+    B -->|校验通过| C[创建订单记录]
+    B -->|校验不通过| D[返回错误提示]
+    C --> E[发起支付请求]
+    E --> F{支付结果}
+    F -->|成功| G[更新订单状态为已支付]
+    F -->|失败| H[订单保持待支付]
+    G --> I[通知仓储系统]
+```
+
+- 节点使用业务语言（如「用户提交订单」而非「POST /api/orders」）
+- 标注关键决策点（如「支付是否成功」）
+- 标注异常分支
+
+## 4. 功能描述
+
+按业务模块逐个描述每个环节的业务功能：
+
+### 4.1 [业务模块名称]
+
+| 属性 | 值 |
+|------|-----|
+| **功能名称** | xxx |
+| **对应接口** | POST /api/xxx |
+| **所属服务** | xxx-service |
+| **业务目的** | 实现xxx业务场景 |
+| **前置条件** | 订单状态必须为"待支付" |
+| **后置结果** | 订单状态变更为"已支付" |
+
+**业务处理逻辑：**
+1. 接收用户提交的订单信息
+2. 校验订单数据的完整性和合法性
+3. 计算订单金额和优惠
+4. 将订单数据持久化到数据库
+5. 返回订单创建结果
+
+**涉及的数据：**
+- 输入：用户ID、商品列表、收货地址
+- 输出：订单ID、订单状态、应付金额
+
+### 4.2 [下一个业务模块]
+...
+
+## 5. 业务规则
+
+### 5.1 校验规则
+
+列出所有输入校验和业务约束规则：
+
+| 编号 | 规则描述 | 涉及接口 | 校验位置 | 违反时的处理 |
+|------|---------|---------|---------|------------|
+| BR-001 | 订单金额必须大于0 | POST /api/orders | OrderService.java:45 | 返回400错误 |
+| BR-002 | 用户ID必须存在且有效 | POST /api/orders | UserValidator.java:23 | 返回404错误 |
+| BR-003 | 同一订单不能重复支付 | POST /api/payment | PaymentService.java:67 | 返回409错误 |
+
+### 5.2 状态转换规则
+
+定义业务对象允许的状态变更路径：
+
+| 编号 | 业务对象 | 允许的转换 | 禁止的转换 | 说明 |
+|------|---------|-----------|-----------|------|
+| SR-001 | 订单 | 待支付→已支付 | 已支付→待支付 | 支付不可逆 |
+| SR-002 | 订单 | 已支付→已取消 | — | 已支付订单允许退款取消 |
+| SR-003 | 订单 | 待支付→已取消 | 已取消→待支付 | 取消后的订单不可恢复 |
+
+### 5.3 其他业务规则
+
+| 编号 | 规则描述 | 类型 | 说明 |
+|------|---------|------|------|
+| OR-001 | 会员用户享受9折优惠 | 计算规则 | UserService.java:89 |
+| OR-002 | 超过500元免运费 | 计算规则 | FeeService.java:34 |
+
+## 附录
+- Trace ID 列表
+- 涉及的源码文件清单
+- 分析数据生成时间
+```
+
+6. **Source code reading strategy for business inference:**
+   - Read Controller methods to understand the business purpose of each endpoint
+   - Read Service layer to extract business rules (validations, conditions, branches)
+   - Read Entity classes to identify business objects and their status fields/enums
+   - Read DAO/Repository to understand data persistence patterns
+   - Read exception handling code to identify error scenarios and edge cases
+   - Cross-reference trace data (DB statements, HTTP params) with source code to confirm inferred rules
+
+7. **State machine inference guidelines:**
+   - Look for enum types named `*Status`, `*State`, `*Type` in entity classes
+   - Look for SQL UPDATE statements that change status fields
+   - Map each status-changing endpoint to the state transition it performs
+   - If state transitions can't be fully inferred, mark them with `(推断)` and note uncertainty
+   - If no clear state machine exists, explain why and skip the state table
+
+8. **Print output paths** — After generating `requirement.md`, list all generated files.
+
 ## Workflow — Config
 
 When the user invokes `/sw-trace config`:
@@ -488,6 +660,15 @@ output:
 └── design.md              # Detailed design document
 ```
 
+### Requirement mode (--requirement):
+```
+.trace/<name>/
+├── meta.json
+├── raw/
+│   └── <trace_id>.json
+└── requirement.md         # Requirement specification document
+```
+
 ## Default Instructions
 
 When no prompt override is configured, follow these instructions:
@@ -499,3 +680,4 @@ When no prompt override is configured, follow these instructions:
 - Highlight actionable findings (errors, slow calls > 1s, shared slow code across traces)
 - **Always print the full list of generated file paths at the end**
 - In design mode, read source code files to generate accurate interface definitions (input/output params)
+- In requirement mode, focus on business logic inference — read source code for business rules, state transitions, and functional descriptions rather than technical details

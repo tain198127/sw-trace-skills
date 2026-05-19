@@ -8,7 +8,7 @@ import { locateAllSpans } from "./code-locator.js";
 import { analyzeTrace, generateAnalysisReport, generateConversationSummary } from "./analyzer.js";
 function parseArgs(rawArgs) {
     const args = rawArgs.slice(2);
-    const cmdDefaults = { noAnalyze: false, noLocate: false, noCsv: false, design: false, limit: 30, minutes: 60 };
+    const cmdDefaults = { noAnalyze: false, noLocate: false, noCsv: false, design: false, requirement: false, limit: 30, minutes: 60 };
     if (args.length === 0 || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
         return { command: "help", traceIds: [], name: "", repo: null, cwd: null, ...cmdDefaults };
     }
@@ -42,7 +42,7 @@ function parseArgs(rawArgs) {
                 minutes = parseInt(args[++i]) || 15;
             }
         }
-        return { command: "list", traceIds: [], name: "", repo, cwd, noAnalyze: false, noLocate: false, noCsv: false, design: false, limit, minutes };
+        return { command: "list", traceIds: [], name: "", repo, cwd, noAnalyze: false, noLocate: false, noCsv: false, design: false, requirement: false, limit, minutes };
     }
     const traceIds = [];
     let name = "";
@@ -70,6 +70,9 @@ function parseArgs(rawArgs) {
         }
         else if (args[i] === "--design") {
             opts.design = true;
+        }
+        else if (args[i] === "--requirement") {
+            opts.requirement = true;
         }
         else if (args[i] === "--limit" || args[i] === "-l") {
             opts.limit = parseInt(args[++i]) || 30;
@@ -107,7 +110,7 @@ function printHelp() {
 sw-trace — SkyWalking trace fetcher, code locator and analyzer
 
 Usage:
-  sw-trace <trace_ids> [--name <name>] [--repo <repo>] [--cwd <dir>] [--no-analyze] [--no-locate] [--no-csv] [--design]
+  sw-trace <trace_ids> [--name <name>] [--repo <repo>] [--cwd <dir>] [--no-analyze] [--no-locate] [--no-csv] [--design] [--requirement]
   sw-trace list [--limit <n>] [--minutes <n>] [--repo <repo>]
   sw-trace config [--repo <repo>]
   sw-trace reset
@@ -124,6 +127,7 @@ Options:
   --no-locate     Skip code location
   --no-csv        Skip CSV export
   --design        Generate detailed design document
+  --requirement   Generate requirement specification document
   --limit, -l     Max traces to list (default: 30)
   --minutes, -m   Time range in minutes (default: 15)
 
@@ -138,6 +142,7 @@ Examples:
   sw-trace abc123.1.123 --name login-bug
   sw-trace id1 id2 id3 --name order-flow --repo bjs_newb
   sw-trace id1 --name payment --design --cwd /path/to/project
+  sw-trace id1 --name order --requirement
   sw-trace list --limit 30
   sw-trace list --minutes 60 --repo bjs_newb
   sw-trace config --repo my-project
@@ -284,7 +289,7 @@ async function runFetch(args) {
     }
     // Code location
     const allLocations = new Map();
-    if (!args.noLocate && config.codebases.length > 0) {
+    if (!args.requirement && !args.noLocate && config.codebases.length > 0) {
         console.log("Locating code...");
         for (const [traceId, { spans }] of allSpans) {
             const allNodes = flattenForLocation(spans);
@@ -293,7 +298,7 @@ async function runFetch(args) {
         }
     }
     // CSV export
-    if (!args.noCsv) {
+    if (!args.requirement && !args.noCsv) {
         console.log("Exporting CSV...");
         for (const [traceId, { spans }] of allSpans) {
             const csvPath = join(outputDir, `${traceId}.csv`);
@@ -302,7 +307,7 @@ async function runFetch(args) {
         }
     }
     // Analysis
-    if (!args.noAnalyze) {
+    if (!args.requirement && !args.noAnalyze) {
         console.log("Analyzing...");
         const results = [];
         for (const [traceId, { spans }] of allSpans) {
@@ -335,7 +340,7 @@ async function runFetch(args) {
         oapUrl: url,
         fetchedAt: new Date().toISOString(),
         codebases: config.codebases.map((cb) => cb.name),
-        mode: args.design ? "design" : "analyze",
+        mode: args.requirement ? "requirement" : args.design ? "design" : "analyze",
         repo: repoName,
     };
     const metaPath = join(outputDir, "meta.json");

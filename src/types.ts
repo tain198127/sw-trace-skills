@@ -119,7 +119,7 @@ export interface TraceMeta {
   oapUrl: string;
   fetchedAt: string;
   codebases: string[];
-  mode?: "analyze" | "design";
+  mode?: "analyze" | "design" | "requirement";
   repo?: string;
 }
 
